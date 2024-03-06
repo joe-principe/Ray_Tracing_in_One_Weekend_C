@@ -30,3 +30,21 @@ val_6-3: 6-3.c
 
 debug_6-3: 6-3.c
 	$(CC) $^ $(CFLAGS) -lm -fsanitize=address,undefined -Og -g -o $@.o
+
+main_6-4: 6-4.c
+	$(CC) $^ $(CFLAGS) -lm -fsanitize=address,undefined -O3 -o $@.o
+
+val_6-4: 6-4.c
+	$(CC) $^ $(CFLAGS) -lm -O3 -o $@.o
+
+debug_6-4: 6-4.c
+	$(CC) $^ $(CFLAGS) -lm -fsanitize=address,undefined -Og -g -o $@.o
+
+main_6-7: 6-7.c
+	$(CC) $^ $(CFLAGS) -lm -fsanitize=address,undefined -O3 -o $@.o
+
+val_6-7: 6-7.c
+	$(CC) $^ $(CFLAGS) -lm -O3 -o $@.o
+
+debug_6-7: 6-7.c
+	$(CC) $^ $(CFLAGS) -lm -fsanitize=address,undefined -Og -g -o $@.o

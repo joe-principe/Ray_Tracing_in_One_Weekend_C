@@ -8,6 +8,9 @@
 typedef struct ray ray;
 typedef struct hit_record hit_record;
 typedef struct sphere sphere;
+typedef void (*hit_fp)(ray *r, float tmin, float tmax, hit_record *hr,
+                       void *obj);
+typedef struct hittable_list hittable_list;
 
 struct ray
 {
@@ -29,10 +32,52 @@ struct sphere
     float radius;
 };
 
+struct hittable_list
+{
+    hit_fp *hit_funcs;
+    void *hittables;
+    size_t length;
+};
+
+/**
+ * Calculates the point of intersection (if any) of the ray with a hittable
+ *
+ * @param[in] r The ray
+ * @param[in] t The length along the ray of the intersection
+ * @param[out] dest The vec3 location of the intersection in world space
+ */
 void ray_at(ray *r, float t, float *dest);
+
+/**
+ * Determines the color of the pixel
+ *
+ * @param[in] r The ray used to find the pixel color
+ * @param[out] dest The resultant pixel color
+ */
 void ray_color(ray *r, float *dest);
-bool hit_sphere(ray *r, float tmin, float tmax, sphere *s, hit_record *hr);
-void set_face_normal(ray *r, hit_record *hr, float *outward_normal);
+
+/**
+ * Determines if the ray intersects with the sphere
+ *
+ * @param[in] r The ray
+ * @param[in] tmin The minimum value along the ray to calculate intersection
+ * @param[in] tmax The maximum value along the ray to calculate intersection
+ * @param[in] obj The type of object with which the ray intersects
+ * @param[out] hr The intersection information
+ *
+ * @return Whether or not the ray intersects with the object
+ */
+bool hit_sphere(ray *r, float tmin, float tmax, void *obj, hit_record *hr);
+
+
+/**
+ * Chooses which object normal should be used for the hit record
+ *
+ * @param[in] r The ray
+ * @param[in] outward_normal The outward facing normal vector
+ * @param[out] hr The intersection information
+ */
+void set_face_normal(ray *r, float *outward_normal, hit_record *hr);
 
 int
 main(void)
@@ -75,24 +120,22 @@ main(void)
     image_height = (int)(image_width / aspect_ratio);
     image_height = (image_height < 1) ? 1 : image_height;
 
-
     /* Camera */
     viewport_height = 2.0f;
     viewport_width = viewport_height * ((float)image_width / image_height);
 
-    /* Calculate the vectors across the horizontal and down the vertical
-     * viewport edges */
+    /* Calculate the vectors along the viewport edges */
     viewport_u[0] = viewport_width;
     viewport_v[1] = -viewport_height;
 
-    /* Calculate the horizontal and vertical delta vectors from pixel to pixel
-     */
+    /* Calculate the delta vectors from pixel to pixel */
     glm_vec3_divs(viewport_u, image_width, pixel_delta_u);
     glm_vec3_divs(viewport_v, image_height, pixel_delta_v);
 
     /* Calculate the location of the upper left pixel */
     /* I wish there were a divsubs function like mulsubs */
-    glm_vec3_sub(camera_center, (vec3){0, 0, focal_length}, viewport_upper_left);
+    glm_vec3_sub(camera_center, (vec3){0, 0, focal_length},
+                 viewport_upper_left);
     glm_vec3_mulsubs(viewport_u, 0.5f, viewport_upper_left);
     glm_vec3_mulsubs(viewport_v, 0.5f, viewport_upper_left);
 
@@ -130,7 +173,7 @@ main(void)
 void
 ray_at(ray *r, float t, float *dest)
 {
-    vec3 temp = GLM_VEC3_ZERO_INIT;
+    vec3 temp;
 
     glm_vec3_scale(r->direction, t, temp);
     glm_vec3_add(r->origin, temp, dest);
@@ -141,13 +184,23 @@ ray_color(ray *r, float *dest)
 {
     float a;
     vec3 temp;
-    vec3 unit_direction = GLM_VEC3_ZERO_INIT;
-    sphere s = {{0.0f, 0.0f, -1.0f}, 0.5f};
+    vec3 unit_direction;
+    sphere s1 = {{0.0f, 0.0f, -1.0f}, 0.5f};
+    sphere s2 = {{0.0f, -100.5f, -1.0f}, 100.0f};
     hit_record hr = {GLM_VEC3_ZERO_INIT, GLM_VEC3_ZERO_INIT, 0.0f, true};
 
-    if (hit_sphere(r, 0, INFINITY, &s, &hr)) {
+    if (hit_sphere(r, 0.0f, INFINITY, &s1, &hr)) {
         ray_at(r, hr.t, temp);
-        glm_vec3_sub(temp, s.center, temp);
+        glm_vec3_sub(temp, s1.center, temp);
+        glm_vec3_normalize(temp);
+        glm_vec3_adds(temp, 1.0f, temp);
+        glm_vec3_scale(temp, 0.5f, dest);
+        return;
+    }
+
+    if (hit_sphere(r, 0.0f, INFINITY, &s2, &hr)) {
+        ray_at(r, hr.t, temp);
+        glm_vec3_sub(temp, s2.center, temp);
         glm_vec3_normalize(temp);
         glm_vec3_adds(temp, 1.0f, temp);
         glm_vec3_scale(temp, 0.5f, dest);
@@ -161,12 +214,13 @@ ray_color(ray *r, float *dest)
 }
 
 bool
-hit_sphere(ray *r, float tmin, float tmax, sphere *s, hit_record *hr)
+hit_sphere(ray *r, float tmin, float tmax, void *obj, hit_record *hr)
 {
     float discriminant;
     float sqd, root;
     float a, b, c;
     vec3 oc, temp, outward_normal;
+    sphere *s = (sphere *)obj;
 
     glm_vec3_sub(r->origin, s->center, oc);
 
@@ -188,26 +242,23 @@ hit_sphere(ray *r, float tmin, float tmax, sphere *s, hit_record *hr)
     }
 
     hr->t = root;
-    ray_at(r, root, hr->position);
+    ray_at(r, hr->t, hr->position);
     glm_vec3_sub(hr->position, s->center, temp);
     glm_vec3_divs(temp, s->radius, outward_normal);
-    set_face_normal(r, hr, outward_normal);
+    set_face_normal(r, outward_normal, hr);
 
     return true;
 }
 
 void
-set_face_normal(ray *r, hit_record *hr, float *outward_normal)
+set_face_normal(ray *r, float *outward_normal, hit_record *hr)
 {
     vec3 outward_normal_neg;
-
     glm_vec3_negate_to(outward_normal, outward_normal_neg);
 
     hr->front_face = glm_vec3_dot(r->direction, outward_normal) < 0.0f;
 
-    if (hr->front_face)
-        glm_vec3_copy(outward_normal, hr->normal);
-    else
-        glm_vec3_copy(outward_normal_neg, hr->normal);
+    hr->front_face ? glm_vec3_copy(outward_normal, hr->normal)
+                   : glm_vec3_copy(outward_normal_neg, hr->normal);
 }
 /* EOF */
