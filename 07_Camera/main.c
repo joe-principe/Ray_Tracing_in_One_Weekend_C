@@ -11,6 +11,7 @@ typedef struct sphere sphere;
 typedef bool (*hit_fp)(ray *r, float tmin, float tmax, void *obj,
                        hit_record *hr);
 typedef struct hittable_list hittable_list;
+typedef struct camera camera;
 
 struct ray
 {
@@ -38,6 +39,17 @@ struct hittable_list
     void **hittables;
     int length;
     int capacity;
+};
+
+struct camera
+{
+    int image_width;
+    int image_height;
+    float aspect_ratio;
+    vec3 center;
+    vec3 pixel00_loc;
+    vec3 pixel_delta_u;
+    vec3 pixel_delta_v;
 };
 
 /**
@@ -82,9 +94,9 @@ void set_face_normal(ray *r, float *outward_normal, hit_record *hr);
 /**
  * Initializes a list of hittable objects within the scene
  *
- * @param[in/out] hl The hittable list to initialize
+ * @return The initialized hittable list
  */
-void init_hittable_list(hittable_list *hl);
+hittable_list *create_hittable_list(void);
 
 /**
  * Deletes a list of hittable objects
@@ -109,106 +121,44 @@ void hittable_list_add(hittable_list *hl, hit_fp hfp, void *obj);
  */
 void hittable_list_remove(hittable_list *hl);
 
+/**
+ * Initializes the scene camera
+ *
+ * @return The intialized camera
+ */
+camera *create_camera(void);
+
+/**
+ * Deletes the scene camera
+ *
+ * @param[in] cam The camera to delete
+ */
+void delete_camera(camera *cam);
+
+/**
+ * Renders the scene
+ *
+ * @param[in] hl The list of hittable objects
+ * @param[in] camera The scene camera
+ */
+void render(hittable_list *hl, camera *cam);
+
 int
 main(void)
 {
+    hittable_list *world = create_hittable_list();
+    camera *cam = create_camera();
 
-    int i, j;
-    int ir, ig, ib;
-    vec3 pixel_color;
+    hittable_list_add(world, hit_sphere,
+                      (void *)&(sphere){{0.0f, 0.0f, -1.0f}, 0.5f});
+    hittable_list_add(world, hit_sphere,
+                      (void *)&(sphere){{0.0f, -100.5f, -1.0f}, 100.0f});
 
-    int image_width, image_height;
-    float aspect_ratio;
-    float viewport_width, viewport_height;
-    vec3 viewport_u = GLM_VEC3_ZERO_INIT;
-    vec3 viewport_v = GLM_VEC3_ZERO_INIT;
-    vec3 viewport_upper_left;
-    vec3 pixel_delta_u, pixel_delta_v;
-    vec3 pixel00_loc, pixel_center;
-
-    float focal_length = 1.0f;
-    vec3 camera_center = GLM_VEC3_ZERO_INIT;
-
-    sphere s1 = {{0.0f, 0.0f, -1.0f}, 0.5f};
-    sphere s2 = {{0.0f, -100.5f, -1.0f}, 100.0f};
-    hittable_list world;
-
-    ray r;
-    vec3 temp;
-
-    FILE *img_fp = NULL;
-    const char *filename = "image.ppm";
-
-    if ((img_fp = fopen(filename, "w")) == NULL) {
-        fprintf(stderr, "Error: Could not open %s for writing.\n", filename);
-        exit(EXIT_FAILURE);
-    }
-
-    glm_vec3_zero(r.direction);
-    glm_vec3_zero(r.origin);
-
-    init_hittable_list(&world);
-
-    /* ----- Image ----- */
-    aspect_ratio = 16.0f / 9.0f;
-    image_width = 400;
-
-    /* Cacluate the image height and ensure that it's at least 1 */
-    image_height = (int)(image_width / aspect_ratio);
-    image_height = (image_height < 1) ? 1 : image_height;
-
-    /* ----- World ----- */
-    hittable_list_add(&world, hit_sphere, (void *)&s1);
-    hittable_list_add(&world, hit_sphere, (void *)&s2);
-
-    /* ----- Camera ----- */
-    viewport_height = 2.0f;
-    viewport_width = viewport_height * ((float)image_width / image_height);
-
-    /* Calculate the vectors along the viewport edges */
-    viewport_u[0] = viewport_width;
-    viewport_v[1] = -viewport_height;
-
-    /* Calculate the delta vectors from pixel to pixel */
-    glm_vec3_divs(viewport_u, image_width, pixel_delta_u);
-    glm_vec3_divs(viewport_v, image_height, pixel_delta_v);
-
-    /* Calculate the location of the upper left pixel */
-    /* I wish there were a divsubs function like mulsubs */
-    glm_vec3_sub(camera_center, (vec3){0, 0, focal_length},
-                 viewport_upper_left);
-    glm_vec3_mulsubs(viewport_u, 0.5f, viewport_upper_left);
-    glm_vec3_mulsubs(viewport_v, 0.5f, viewport_upper_left);
-
-    glm_vec3_add(pixel_delta_u, pixel_delta_v, temp);
-    glm_vec3_scale(temp, 0.5f, temp);
-    glm_vec3_add(viewport_upper_left, temp, pixel00_loc);
-
-
-    fprintf(img_fp, "P3\n%d %d\n255\n", image_width, image_height);
-
-    for (i = 0; i < image_height; i++) {
-        for (j = 0; j < image_width; j++) {
-            glm_vec3_scale(pixel_delta_u, j, temp);
-            glm_vec3_add(pixel00_loc, temp, pixel_center);
-            glm_vec3_muladds(pixel_delta_v, i, pixel_center);
-
-            glm_vec3_sub(pixel_center, camera_center, r.direction);
-
-            ray_color(&r, &world, pixel_color);
-
-            ir = (int)(255.99f * pixel_color[0]);
-            ig = (int)(255.99f * pixel_color[1]);
-            ib = (int)(255.99f * pixel_color[2]);
-
-            fprintf(img_fp, "%d %d %d\n", ir, ig, ib);
-        }
-    }
-    
+    render(world, cam);
     printf("Done\n");
 
-    fclose(img_fp);
-    delete_hittable_list(&world);
+    free(cam);
+    delete_hittable_list(world);
 
     return 0;
 }
@@ -294,9 +244,17 @@ set_face_normal(ray *r, float *outward_normal, hit_record *hr)
                    : glm_vec3_copy(outward_normal_neg, hr->normal);
 }
 
-void
-init_hittable_list(hittable_list *hl)
+hittable_list *
+create_hittable_list(void)
 {
+    hittable_list *hl = malloc(sizeof(*hl));
+
+    if (hl == NULL) {
+        fprintf(stderr, "Error: Could not allocate enough memory for hittable "
+                "list\n");
+        exit(EXIT_FAILURE);
+    }
+
     hl->capacity = 8;
     hl->length = 0;
 
@@ -313,6 +271,8 @@ init_hittable_list(hittable_list *hl)
                 "hittables in hittable list\n");
         exit(EXIT_FAILURE);
     }
+
+    return hl;
 }
 
 void
@@ -320,7 +280,7 @@ delete_hittable_list(hittable_list *hl)
 {
     free(hl->hittables);
     free(hl->hit_funcs);
-    return;
+    free(hl);
 }
 
 void
@@ -359,7 +319,6 @@ hittable_list_add(hittable_list *hl, hit_fp hfp, void *obj)
 
     hl->hit_funcs[hl->length] = hfp;
     hl->hittables[hl->length] = obj;
-
     hl->length++;
 }
 
@@ -402,5 +361,99 @@ hittable_list_remove(hittable_list *hl)
 
         hl->capacity /= 2;
     }
+}
+
+camera *
+create_camera(void)
+{
+    float focal_length = 1.0f;
+    float viewport_width, viewport_height;
+    vec3 viewport_u = GLM_VEC3_ZERO_INIT;
+    vec3 viewport_v = GLM_VEC3_ZERO_INIT;
+    vec3 viewport_upper_left, temp;
+
+    camera *cam = malloc(sizeof(*cam));
+
+    if (cam == NULL) {
+        fprintf(stderr, "Error: Could not allocate enough memory for camera\n");
+        exit(EXIT_FAILURE);
+    }
+
+    glm_vec3_zero(cam->center);
+
+    /* ----- Image ----- */
+    cam->aspect_ratio = 16.0f / 9.0f;
+    cam->image_width = 400;
+
+    cam->image_height = (int)(cam->image_width / cam->aspect_ratio);
+    cam->image_height = (cam->image_height < 1) ? 1 : cam->image_height;
+
+    /* ----- Camera ----- */
+    viewport_height = 2.0f;
+    viewport_width = viewport_height * ((float)cam->image_width / cam->image_height);
+
+    viewport_u[0] = viewport_width;
+    viewport_v[1] = -viewport_height;
+
+    glm_vec3_divs(viewport_u, cam->image_width, cam->pixel_delta_u);
+    glm_vec3_divs(viewport_v, cam->image_height, cam->pixel_delta_v);
+
+    /* I wish there were a divsubs function like mulsubs */
+    glm_vec3_sub(cam->center, (vec3){0, 0, focal_length},
+                 viewport_upper_left);
+    glm_vec3_mulsubs(viewport_u, 0.5f, viewport_upper_left);
+    glm_vec3_mulsubs(viewport_v, 0.5f, viewport_upper_left);
+
+    glm_vec3_add(cam->pixel_delta_u, cam->pixel_delta_v, temp);
+    glm_vec3_scale(temp, 0.5f, temp);
+    glm_vec3_add(viewport_upper_left, temp, cam->pixel00_loc);
+
+    return cam;
+}
+
+void
+delete_camera(camera *cam)
+{
+    free(cam);
+}
+
+void
+render(hittable_list *hl, camera *cam)
+{
+    int i, j;
+    int ir, ig, ib;
+    vec3 pixel_color, pixel_center, temp;
+
+    ray r = {{0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}};
+
+    FILE *img_fp = NULL;
+    const char *filename = "image.ppm";
+
+    if ((img_fp = fopen(filename, "w")) == NULL) {
+        fprintf(stderr, "Error: Could not open %s for writing.\n", filename);
+        exit(EXIT_FAILURE);
+    }
+
+    fprintf(img_fp, "P3\n%d %d\n255\n", cam->image_width, cam->image_height);
+
+    for (i = 0; i < cam->image_height; i++) {
+        for (j = 0; j < cam->image_width; j++) {
+            glm_vec3_scale(cam->pixel_delta_u, j, temp);
+            glm_vec3_add(cam->pixel00_loc, temp, pixel_center);
+            glm_vec3_muladds(cam->pixel_delta_v, i, pixel_center);
+
+            glm_vec3_sub(pixel_center, cam->center, r.direction);
+
+            ray_color(&r, hl, pixel_color);
+
+            ir = (int)(255.99f * pixel_color[0]);
+            ig = (int)(255.99f * pixel_color[1]);
+            ib = (int)(255.99f * pixel_color[2]);
+
+            fprintf(img_fp, "%d %d %d\n", ir, ig, ib);
+        }
+    }
+
+    fclose(img_fp);
 }
 /* EOF */
